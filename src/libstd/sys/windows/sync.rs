@@ -19,11 +19,14 @@ pub type ULONG = c_ulong;
 pub struct CONDITION_VARIABLE { pub ptr: LPVOID }
 #[repr(C)]
 pub struct SRWLOCK { pub ptr: LPVOID }
+#[repr(C)]
+pub struct CRITICAL_SECTION { pub ptr: LPVOID }
 
 pub const CONDITION_VARIABLE_INIT: CONDITION_VARIABLE = CONDITION_VARIABLE {
     ptr: 0 as *mut _,
 };
 pub const SRWLOCK_INIT: SRWLOCK = SRWLOCK { ptr: 0 as *mut _ };
+pub const CRITICAL_SECTION_INIT: CRITICAL_SECTION = CRITICAL_SECTION { ptr: 0 as *mut _ };
 
 extern "system" {
     // condition variables
@@ -41,4 +44,10 @@ extern "system" {
     pub fn ReleaseSRWLockShared(SRWLock: PSRWLOCK);
     pub fn TryAcquireSRWLockExclusive(SRWLock: PSRWLOCK) -> BOOLEAN;
     pub fn TryAcquireSRWLockShared(SRWLock: PSRWLOCK) -> BOOLEAN;
+
+    pub fn InitializeCriticalSection(CriticalSection: CRITICAL_SECTION);
+    pub fn EnterCriticalSection(CriticalSection: CRITICAL_SECTION);
+    pub fn TryEnterCriticalSection(CriticalSection: CRITICAL_SECTION) -> BOOLEAN;
+    pub fn LeaveCriticalSection(CriticalSection: CRITICAL_SECTION);
+    pub fn DeleteCriticalSection(CriticalSection: CRITICAL_SECTION);
 }

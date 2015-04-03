@@ -16,7 +16,7 @@ use cmp;
 use fmt;
 use io::lazy::Lazy;
 use io::{self, BufReader, LineWriter};
-use sync::{Arc, Mutex, MutexGuard};
+use sync::{Arc, ReentrantMutex, ReentrantMutexGuard};
 use sys::stdio;
 
 /// Stdout used by print! and println! macros
@@ -96,7 +96,7 @@ impl Write for StderrRaw {
 /// of `Stdin` must be executed with care.
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct Stdin {
-    inner: Arc<Mutex<BufReader<StdinRaw>>>,
+    inner: Arc<ReentrantMutex<BufReader<StdinRaw>>>,
 }
 
 /// A locked reference to the a `Stdin` handle.
@@ -105,7 +105,7 @@ pub struct Stdin {
 /// constructed via the `lock` method on `Stdin`.
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct StdinLock<'a> {
-    inner: MutexGuard<'a, BufReader<StdinRaw>>,
+    inner: ReentrantMutexGuard<'a, BufReader<StdinRaw>>,
 }
 
 /// Create a new handle to the global standard input stream of this process.
@@ -119,17 +119,17 @@ pub struct StdinLock<'a> {
 /// locked version, `StdinLock`, implements both `Read` and `BufRead`, however.
 #[stable(feature = "rust1", since = "1.0.0")]
 pub fn stdin() -> Stdin {
-    static INSTANCE: Lazy<Mutex<BufReader<StdinRaw>>> = lazy_init!(stdin_init);
+    static INSTANCE: Lazy<ReentrantMutex<BufReader<StdinRaw>>> = lazy_init!(stdin_init);
     return Stdin {
         inner: INSTANCE.get().expect("cannot access stdin during shutdown"),
     };
 
-    fn stdin_init() -> Arc<Mutex<BufReader<StdinRaw>>> {
+    fn stdin_init() -> Arc<ReentrantMutex<BufReader<StdinRaw>>> {
         // The default buffer capacity is 64k, but apparently windows
         // doesn't like 64k reads on stdin. See #13304 for details, but the
         // idea is that on windows we use a slightly smaller buffer that's
         // been seen to be acceptable.
-        Arc::new(Mutex::new(if cfg!(windows) {
+        Arc::new(ReentrantMutex::new(if cfg!(windows) {
             BufReader::with_capacity(8 * 1024, stdin_raw())
         } else {
             BufReader::new(stdin_raw())
@@ -210,7 +210,7 @@ pub struct Stdout {
     // FIXME: this should be LineWriter or BufWriter depending on the state of
     //        stdout (tty or not). Note that if this is not line buffered it
     //        should also flush-on-panic or some form of flush-on-abort.
-    inner: Arc<Mutex<LineWriter<StdoutRaw>>>,
+    inner: Arc<ReentrantMutex<LineWriter<StdoutRaw>>>,
 }
 
 /// A locked reference to the a `Stdout` handle.
@@ -219,7 +219,7 @@ pub struct Stdout {
 /// method on `Stdout`.
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct StdoutLock<'a> {
-    inner: MutexGuard<'a, LineWriter<StdoutRaw>>,
+    inner: ReentrantMutexGuard<'a, LineWriter<StdoutRaw>>,
 }
 
 /// Constructs a new reference to the standard output of the current process.
@@ -231,13 +231,13 @@ pub struct StdoutLock<'a> {
 /// The returned handle implements the `Write` trait.
 #[stable(feature = "rust1", since = "1.0.0")]
 pub fn stdout() -> Stdout {
-    static INSTANCE: Lazy<Mutex<LineWriter<StdoutRaw>>> = lazy_init!(stdout_init);
+    static INSTANCE: Lazy<ReentrantMutex<LineWriter<StdoutRaw>>> = lazy_init!(stdout_init);
     return Stdout {
         inner: INSTANCE.get().expect("cannot access stdout during shutdown"),
     };
 
-    fn stdout_init() -> Arc<Mutex<LineWriter<StdoutRaw>>> {
-        Arc::new(Mutex::new(LineWriter::new(stdout_raw())))
+    fn stdout_init() -> Arc<ReentrantMutex<LineWriter<StdoutRaw>>> {
+        Arc::new(ReentrantMutex::new(LineWriter::new(stdout_raw())))
     }
 }
 
@@ -264,8 +264,9 @@ impl Write for Stdout {
     fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
         self.lock().write_all(buf)
     }
-    // Don't override write_fmt as it's possible to run arbitrary code during a
-    // write_fmt, allowing the possibility of a recursive lock (aka deadlock)
+    fn write_fmt(&mut self, args: fmt::Arguments) -> io::Result<()> {
+        self.lock().write_fmt(args)
+    }
 }
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<'a> Write for StdoutLock<'a> {
@@ -280,7 +281,7 @@ impl<'a> Write for StdoutLock<'a> {
 /// For more information, see `stderr`
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct Stderr {
-    inner: Arc<Mutex<StderrRaw>>,
+    inner: Arc<ReentrantMutex<StderrRaw>>,
 }
 
 /// A locked reference to the a `Stderr` handle.
@@ -289,7 +290,7 @@ pub struct Stderr {
 /// method on `Stderr`.
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct StderrLock<'a> {
-    inner: MutexGuard<'a, StderrRaw>,
+    inner: ReentrantMutexGuard<'a, StderrRaw>,
 }
 
 /// Constructs a new reference to the standard error stream of a process.
@@ -300,13 +301,13 @@ pub struct StderrLock<'a> {
 /// The returned handle implements the `Write` trait.
 #[stable(feature = "rust1", since = "1.0.0")]
 pub fn stderr() -> Stderr {
-    static INSTANCE: Lazy<Mutex<StderrRaw>> = lazy_init!(stderr_init);
+    static INSTANCE: Lazy<ReentrantMutex<StderrRaw>> = lazy_init!(stderr_init);
     return Stderr {
         inner: INSTANCE.get().expect("cannot access stderr during shutdown"),
     };
 
-    fn stderr_init() -> Arc<Mutex<StderrRaw>> {
-        Arc::new(Mutex::new(stderr_raw()))
+    fn stderr_init() -> Arc<ReentrantMutex<StderrRaw>> {
+        Arc::new(ReentrantMutex::new(stderr_raw()))
     }
 }
 
@@ -333,7 +334,9 @@ impl Write for Stderr {
     fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
         self.lock().write_all(buf)
     }
-    // Don't override write_fmt for the same reasons as Stdout
+    fn write_fmt(&mut self, args: fmt::Arguments) -> io::Result<()> {
+        self.lock().write_fmt(args)
+    }
 }
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<'a> Write for StderrLock<'a> {
