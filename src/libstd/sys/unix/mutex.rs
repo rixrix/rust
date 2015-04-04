@@ -12,6 +12,7 @@ use prelude::v1::*;
 
 use cell::UnsafeCell;
 use sys::sync as ffi;
+use mem;
 
 pub struct Mutex { inner: UnsafeCell<ffi::pthread_mutex_t> }
 
@@ -65,5 +66,40 @@ impl Mutex {
         // Once it is used (locked/unlocked) or pthread_mutex_init() is called,
         // this behaviour no longer occurs.
         debug_assert!(r == 0 || r == libc::EINVAL);
+    }
+}
+
+pub struct ReentrantMutex { inner: UnsafeCell<ffi::pthread_mutex_t> }
+
+unsafe impl Send for ReentrantMutex {}
+unsafe impl Sync for ReentrantMutex {}
+
+impl ReentrantMutex {
+    pub unsafe fn new() -> ReentrantMutex {
+        let mut mutex: ffi::pthread_mutex_t = mem::uninitialized();
+        let mut attr: ffi::pthread_mutexattr_t = mem::uninitialized();
+        debug_assert_eq!(ffi::pthread_mutexattr_init(&mut attr as *mut _), 0);
+        debug_assert_eq!(ffi::pthread_mutexattr_settype(&mut attr as *mut _,
+                                                        ffi::PTHREAD_MUTEX_RECURSIVE), 0);
+        debug_assert_eq!(ffi::pthread_mutex_init(&mut mutex as *mut _, &attr as *const _), 0);
+        debug_assert_eq!(ffi::pthread_mutexattr_destroy(&mut attr as *mut _), 0);
+        ReentrantMutex { inner: UnsafeCell { value: mutex } }
+    }
+
+    pub unsafe fn lock(&self) {
+        debug_assert_eq!(ffi::pthread_mutex_lock(self.inner.get()), 0);
+    }
+
+    #[inline]
+    pub unsafe fn try_lock(&self) -> bool {
+        ffi::pthread_mutex_trylock(self.inner.get()) == 0
+    }
+
+    pub unsafe fn unlock(&self) {
+        debug_assert_eq!(ffi::pthread_mutex_unlock(self.inner.get()), 0);
+    }
+
+    pub unsafe fn destroy(&self) {
+        debug_assert_eq!(ffi::pthread_mutex_destroy(self.inner.get()), 0);
     }
 }
